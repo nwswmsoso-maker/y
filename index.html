@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>محوّل النص إلى صوت</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f0e8;
+    --surface: #ede7d9;
+    --surface2: #e4dccf;
+    --ink: #1a1612;
+    --ink2: #5c5347;
+    --accent: #c84b2f;
+    --accent2: #e8824a;
+    --accent-light: rgba(200,75,47,0.1);
+    --border: rgba(26,22,18,0.12);
+    --shadow: 0 4px 24px rgba(26,22,18,0.1);
+    --shadow-lg: 0 12px 48px rgba(26,22,18,0.15);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: 'Tajawal', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px 60px;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Decorative background */
+  body::before {
+    content: '';
+    position: fixed;
+    top: -200px; left: -200px;
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(200,75,47,0.06) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    bottom: -150px; right: -150px;
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, rgba(232,130,74,0.07) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Noise texture overlay */
+  .noise {
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+  }
+
+  .page-wrap {
+    width: 100%;
+    max-width: 720px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Header */
+  .header {
+    margin-bottom: 44px;
+    position: relative;
+  }
+
+  .header-tag {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    padding: 5px 14px;
+    border-radius: 2px;
+    margin-bottom: 16px;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(2.4rem, 6vw, 3.8rem);
+    font-weight: 800;
+    line-height: 1;
+    color: var(--ink);
+    letter-spacing: -2px;
+  }
+
+  h1 em {
+    font-style: normal;
+    color: var(--accent);
+    position: relative;
+  }
+
+  h1 em::after {
+    content: '';
+    position: absolute;
+    bottom: 2px; left: 0; right: 0;
+    height: 3px;
+    background: var(--accent2);
+    border-radius: 2px;
+    transform: scaleX(0);
+    transform-origin: right;
+    animation: underline 0.8s 0.5s ease forwards;
+  }
+
+  @keyframes underline {
+    to { transform: scaleX(1); transform-origin: left; }
+  }
+
+  .header-sub {
+    margin-top: 12px;
+    font-size: 1rem;
+    color: var(--ink2);
+    font-weight: 400;
+  }
+
+  /* Decorative line */
+  .h-rule {
+    width: 60px; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 2px;
+    margin: 18px 0 0;
+  }
+
+  /* Card */
+  .card {
+    background: #fff;
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+    animation: slideUp 0.5s ease both;
+  }
+
+  @keyframes slideUp {
+    from { opacity:0; transform: translateY(20px); }
+    to   { opacity:1; transform: translateY(0); }
+  }
+
+  .card:nth-child(2) { animation-delay: 0.1s; }
+  .card:nth-child(3) { animation-delay: 0.2s; }
+  .card:nth-child(4) { animation-delay: 0.3s; }
+
+  .card-header {
+    padding: 18px 24px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .card-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    color: var(--ink2);
+    text-transform: uppercase;
+  }
+
+  /* Textarea */
+  .textarea-wrap {
+    padding: 16px 24px 8px;
+    position: relative;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 180px;
+    border: none;
+    outline: none;
+    resize: vertical;
+    font-family: 'Tajawal', sans-serif;
+    font-size: 1.05rem;
+    line-height: 1.9;
+    color: var(--ink);
+    background: transparent;
+    direction: rtl;
+  }
+
+  textarea::placeholder { color: rgba(26,22,18,0.25); }
+
+  .textarea-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 24px 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .char-count {
+    font-size: 0.78rem;
+    color: var(--ink2);
+  }
+
+  .char-count span { color: var(--accent); font-weight: 700; }
+
+  .btn-clear {
+    background: none;
+    border: none;
+    font-family: 'Tajawal', sans-serif;
+    font-size: 0.8rem;
+    color: var(--ink2);
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+  .btn-clear:hover { background: var(--accent-light); color: var(--accent); }
+
+  /* Settings */
+  .settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+
+  .setting-item {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+  }
+
+  .setting-item:nth-child(odd) { border-left: none; }
+  .setting-item:nth-last-child(-n+2) { border-bottom: none; }
+
+  .setting-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--ink2);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .setting-label span {
+    font-size: 0.82rem;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  input[type=range] {
+    width: 100%;
+    -webkit-appearance: none;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--surface2);
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 2px 8px rgba(200,75,47,0.35);
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  input[type=range]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 3px 14px rgba(200,75,47,0.5);
+  }
+
+  /* Voice selector */
+  .voice-grid {
+    padding: 16px 24px 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .voice-chip {
+    padding: 8px 16px;
+    border-radius: 100px;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    font-family: 'Tajawal', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--ink2);
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .voice-chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-light);
+  }
+
+  .voice-chip.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .voice-chip .lang-badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.25);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.65rem;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  .voice-chip:not(.active) .lang-badge {
+    background: var(--surface2);
+    color: var(--ink2);
+  }
+
+  /* Visualizer */
+  .viz-section {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .wave-bars {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 48px;
+  }
+
+  .bar {
+    width: 4px;
+    border-radius: 2px;
+    background: var(--accent);
+    opacity: 0.3;
+    height: 4px;
+    transition: height 0.1s ease;
+  }
+
+  .bar.active {
+    opacity: 1;
+    animation: barAnim var(--dur, 0.8s) ease-in-out infinite alternate;
+    animation-delay: var(--delay, 0s);
+  }
+
+  @keyframes barAnim {
+    from { height: 4px; }
+    to   { height: var(--h, 30px); }
+  }
+
+  /* Play button */
+  .play-section {
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .btn-play {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 16px 32px;
+    border-radius: 100px;
+    font-family: 'Tajawal', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.25s;
+    box-shadow: 0 4px 16px rgba(200,75,47,0.35);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .btn-play::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
+    pointer-events: none;
+  }
+
+  .btn-play:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(200,75,47,0.45);
+  }
+
+  .btn-play:active { transform: translateY(0); }
+
+  .btn-play.speaking {
+    background: var(--ink);
+    box-shadow: 0 4px 16px rgba(26,22,18,0.25);
+  }
+
+  .btn-play .icon { font-size: 1.1rem; }
+
+  .btn-stop {
+    padding: 16px 24px;
+    border-radius: 100px;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    font-family: 'Tajawal', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--ink2);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: none;
+  }
+
+  .btn-stop.show { display: flex; align-items: center; gap: 8px; }
+  .btn-stop:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Progress */
+  .progress-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .progress-bar-bg {
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+
+  .progress-label {
+    font-size: 0.72rem;
+    color: var(--ink2);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* Highlighted word */
+  .highlight-box {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 16px 24px;
+    margin: 0 24px 20px;
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--border);
+  }
+
+  .highlight-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .highlight-dot.show { opacity: 1; animation: dotPulse 1s infinite; }
+  @keyframes dotPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.4)} }
+
+  #currentWord {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+    min-width: 0;
+  }
+
+  #wordContext {
+    font-size: 0.82rem;
+    color: var(--ink2);
+  }
+
+  /* Preset texts */
+  .presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 14px 24px 18px;
+  }
+
+  .preset-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-family: 'Tajawal', sans-serif;
+    font-size: 0.8rem;
+    color: var(--ink2);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 500;
+  }
+
+  .preset-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-light);
+  }
+
+  /* No support */
+  .no-support {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 12px;
+    padding: 16px 20px;
+    font-size: 0.9rem;
+    color: #856404;
+    display: none;
+    margin-bottom: 16px;
+  }
+
+  /* Responsive */
+  @media (max-width: 500px) {
+    .settings-grid { grid-template-columns: 1fr; }
+    .setting-item { border-left: none !important; }
+    .setting-item:last-child { border-bottom: none; }
+  }
+</style>
+</head>
+<body>
+<div class="noise"></div>
+
+<div class="page-wrap">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-tag">Text To Speech</div>
+    <h1>حوّل النص<br>إلى <em>صوت</em></h1>
+    <p class="header-sub">اكتب أي نص وحوّله لصوت بلغات وأصوات مختلفة</p>
+    <div class="h-rule"></div>
+  </div>
+
+  <div class="no-support" id="noSupport">
+    ⚠️ متصفحك لا يدعم تحويل النص إلى صوت. جرّب Chrome أو Edge أو Safari.
+  </div>
+
+  <!-- Text Input Card -->
+  <div class="card" style="animation-delay:0s">
+    <div class="card-header">
+      <div class="card-title">النص المراد قراءته</div>
+    </div>
+
+    <div class="textarea-wrap">
+      <textarea id="textInput" placeholder="اكتب أو الصق نصك هنا..." oninput="updateCount()"></textarea>
+    </div>
+
+    <div class="textarea-footer">
+      <div class="char-count">الأحرف: <span id="charCount">0</span></div>
+      <button class="btn-clear" onclick="clearText()">مسح النص ✕</button>
+    </div>
+
+    <!-- Presets -->
+    <div class="card-header" style="padding-top:0; border-top:1px solid var(--border); padding-top:14px">
+      <div class="card-title">نصوص جاهزة</div>
+    </div>
+    <div class="presets">
+      <button class="preset-btn" onclick="setPreset('ar')">🌙 نص عربي</button>
+      <button class="preset-btn" onclick="setPreset('en')">🇬🇧 English Text</button>
+      <button class="preset-btn" onclick="setPreset('poem')">📜 قصيدة</button>
+      <button class="preset-btn" onclick="setPreset('news')">📰 خبر</button>
+      <button class="preset-btn" onclick="setPreset('count')">🔢 أرقام</button>
+    </div>
+  </div>
+
+  <!-- Voice Selector Card -->
+  <div class="card" style="animation-delay:0.1s">
+    <div class="card-header">
+      <div class="card-title">اختيار الصوت</div>
+    </div>
+    <div class="voice-grid" id="voiceGrid">
+      <div style="color:var(--ink2); font-size:0.85rem; padding:4px 0">جارٍ تحميل الأصوات...</div>
+    </div>
+  </div>
+
+  <!-- Settings Card -->
+  <div class="card" style="animation-delay:0.2s">
+    <div class="card-header">
+      <div class="card-title">الإعدادات</div>
+    </div>
+    <div class="settings-grid">
+      <div class="setting-item">
+        <div class="setting-label">السرعة <span id="rateVal">1.0×</span></div>
+        <input type="range" id="rateSlider" min="0.3" max="2" step="0.05" value="1" oninput="updateSetting('rate',this.value)">
+      </div>
+      <div class="setting-item">
+        <div class="setting-label">الحدة <span id="pitchVal">1.0</span></div>
+        <input type="range" id="pitchSlider" min="0.5" max="2" step="0.05" value="1" oninput="updateSetting('pitch',this.value)">
+      </div>
+      <div class="setting-item">
+        <div class="setting-label">مستوى الصوت <span id="volVal">100%</span></div>
+        <input type="range" id="volSlider" min="0" max="1" step="0.01" value="1" oninput="updateSetting('vol',this.value)">
+      </div>
+      <div class="setting-item">
+        <div class="setting-label">اللغة الافتراضية <span id="langVal">AR</span></div>
+        <input type="range" id="langSlider" min="0" max="1" step="1" value="0" oninput="updateLangPref(this.value)">
+      </div>
+    </div>
+  </div>
+
+  <!-- Player Card -->
+  <div class="card" style="animation-delay:0.3s">
+    <!-- Wave visualizer -->
+    <div class="viz-section">
+      <div class="wave-bars" id="waveBars"></div>
+    </div>
+
+    <!-- Current word -->
+    <div class="highlight-box">
+      <div class="highlight-dot" id="hlDot"></div>
+      <div>
+        <div id="currentWord">—</div>
+        <div id="wordContext" style="font-size:0.75rem; color:var(--ink2); margin-top:2px"></div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="play-section">
+      <button class="btn-play" id="playBtn" onclick="speak()">
+        <span class="icon">▶</span>
+        <span id="playLabel">تشغيل</span>
+      </button>
+
+      <button class="btn-stop" id="stopBtn" onclick="stopSpeech()">
+        ⏹ إيقاف
+      </button>
+
+      <div class="progress-wrap">
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-label">
+          <span id="progressText">—</span>
+          <span id="totalWords">0 كلمة</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── State ───
+let voices = [];
+let selectedVoice = null;
+let utterance = null;
+let isSpeaking = false;
+let isPaused = false;
+let langPref = 0; // 0 = Arabic first, 1 = all
+let words = [];
+let wordIndex = 0;
+
+// ─── Wave bars ───
+const waveBarsEl = document.getElementById('waveBars');
+const BAR_COUNT = 32;
+for (let i = 0; i < BAR_COUNT; i++) {
+  const b = document.createElement('div');
+  b.className = 'bar';
+  const h = Math.random() * 28 + 8;
+  const dur = (Math.random() * 0.5 + 0.5).toFixed(2);
+  const del = (Math.random() * 0.4).toFixed(2);
+  b.style.cssText = `--h:${h}px; --dur:${dur}s; --delay:${del}s`;
+  waveBarsEl.appendChild(b);
+}
+
+function setWaveActive(on) {
+  waveBarsEl.querySelectorAll('.bar').forEach(b => {
+    if (on) b.classList.add('active');
+    else { b.classList.remove('active'); b.style.height = '4px'; }
+  });
+}
+
+// ─── Voices ───
+function loadVoices() {
+  voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return;
+  renderVoices();
+}
+
+function renderVoices() {
+  const grid = document.getElementById('voiceGrid');
+  grid.innerHTML = '';
+
+  // Priority: Arabic voices first, then others
+  let ar = voices.filter(v => v.lang.startsWith('ar'));
+  let en = voices.filter(v => v.lang.startsWith('en'));
+  let rest = voices.filter(v => !v.lang.startsWith('ar') && !v.lang.startsWith('en'));
+
+  let list = langPref === 0 ? [...ar, ...en, ...rest.slice(0, 3)] : voices;
+
+  if (!list.length) {
+    grid.innerHTML = '<div style="color:var(--ink2);font-size:0.85rem">لا توجد أصوات متاحة في هذا المتصفح</div>';
+    return;
+  }
+
+  list.forEach((v, i) => {
+    const chip = document.createElement('button');
+    chip.className = 'voice-chip' + (i === 0 ? ' active' : '');
+    const flag = v.lang.startsWith('ar') ? '🌙 ' : v.lang.startsWith('en') ? '🇬🇧 ' : '🌐 ';
+    chip.innerHTML = `<span class="lang-badge">${v.lang.split('-')[0].toUpperCase()}</span>${flag}${v.name.replace(/Microsoft |Google |Apple /, '').split(' (')[0].substring(0, 18)}`;
+    chip.onclick = () => {
+      document.querySelectorAll('.voice-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      selectedVoice = v;
+    };
+    if (i === 0) selectedVoice = v;
+    grid.appendChild(chip);
+  });
+}
+
+window.speechSynthesis.onvoiceschanged = loadVoices;
+loadVoices();
+
+// ─── Settings ───
+function updateSetting(type, val) {
+  val = parseFloat(val);
+  if (type === 'rate') document.getElementById('rateVal').textContent = val.toFixed(2) + '×';
+  else if (type === 'pitch') document.getElementById('pitchVal').textContent = val.toFixed(2);
+  else if (type === 'vol') document.getElementById('volVal').textContent = Math.round(val * 100) + '%';
+}
+
+function updateLangPref(val) {
+  langPref = parseInt(val);
+  document.getElementById('langVal').textContent = val == 0 ? 'AR' : 'ALL';
+  renderVoices();
+}
+
+// ─── Speak ───
+function speak() {
+  if (!('speechSynthesis' in window)) {
+    document.getElementById('noSupport').style.display = 'block';
+    return;
+  }
+
+  if (isPaused) {
+    window.speechSynthesis.resume();
+    isPaused = false;
+    isSpeaking = true;
+    updateUI(true);
+    return;
+  }
+
+  if (isSpeaking) {
+    window.speechSynthesis.pause();
+    isPaused = true;
+    isSpeaking = false;
+    updateUI(false, true);
+    return;
+  }
+
+  const text = document.getElementById('textInput').value.trim();
+  if (!text) {
+    document.getElementById('textInput').focus();
+    document.getElementById('textInput').style.borderBottom = '2px solid var(--accent)';
+    setTimeout(() => document.getElementById('textInput').style.borderBottom = '', 1000);
+    return;
+  }
+
+  words = text.split(/\s+/).filter(Boolean);
+  wordIndex = 0;
+  document.getElementById('totalWords').textContent = words.length + ' كلمة';
+
+  utterance = new SpeechSynthesisUtterance(text);
+  if (selectedVoice) utterance.voice = selectedVoice;
+  utterance.rate  = parseFloat(document.getElementById('rateSlider').value);
+  utterance.pitch = parseFloat(document.getElementById('pitchSlider').value);
+  utterance.volume= parseFloat(document.getElementById('volSlider').value);
+
+  utterance.onboundary = (e) => {
+    if (e.name === 'word') {
+      const charIdx = e.charIndex;
+      const spoken = text.substring(0, charIdx + e.charLength);
+      const wds = spoken.trim().split(/\s+/);
+      wordIndex = wds.length - 1;
+      const currentW = words[wordIndex] || '';
+      document.getElementById('currentWord').textContent = currentW;
+      const pct = words.length ? Math.min(100, Math.round((wordIndex / words.length) * 100)) : 0;
+      document.getElementById('progressFill').style.width = pct + '%';
+      document.getElementById('progressText').textContent = (wordIndex + 1) + ' / ' + words.length;
+      document.getElementById('wordContext').textContent = words.slice(Math.max(0, wordIndex - 1), wordIndex + 3).join(' ');
+      document.getElementById('hlDot').classList.add('show');
+    }
+  };
+
+  utterance.onstart = () => {
+    isSpeaking = true;
+    isPaused = false;
+    updateUI(true);
+  };
+
+  utterance.onend = () => {
+    isSpeaking = false;
+    isPaused = false;
+    updateUI(false);
+    document.getElementById('progressFill').style.width = '100%';
+    document.getElementById('progressText').textContent = 'اكتملت القراءة ✓';
+    document.getElementById('hlDot').classList.remove('show');
+    setTimeout(() => {
+      document.getElementById('progressFill').style.width = '0%';
+      document.getElementById('progressText').textContent = '—';
+      document.getElementById('currentWord').textContent = '—';
+    }, 2000);
+  };
+
+  utterance.onerror = (e) => {
+    console.error(e);
+    isSpeaking = false;
+    updateUI(false);
+  };
+
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
+}
+
+function stopSpeech() {
+  window.speechSynthesis.cancel();
+  isSpeaking = false;
+  isPaused = false;
+  updateUI(false);
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('progressText').textContent = '—';
+  document.getElementById('currentWord').textContent = '—';
+  document.getElementById('hlDot').classList.remove('show');
+}
+
+function updateUI(speaking, paused = false) {
+  const btn = document.getElementById('playBtn');
+  const label = document.getElementById('playLabel');
+  const stop = document.getElementById('stopBtn');
+
+  setWaveActive(speaking);
+
+  if (speaking) {
+    btn.classList.add('speaking');
+    btn.querySelector('.icon').textContent = '⏸';
+    label.textContent = 'إيقاف مؤقت';
+    stop.classList.add('show');
+  } else if (paused) {
+    btn.classList.remove('speaking');
+    btn.querySelector('.icon').textContent = '▶';
+    label.textContent = 'متابعة';
+    stop.classList.add('show');
+  } else {
+    btn.classList.remove('speaking');
+    btn.querySelector('.icon').textContent = '▶';
+    label.textContent = 'تشغيل';
+    stop.classList.remove('show');
+  }
+}
+
+// ─── Helpers ───
+function updateCount() {
+  const t = document.getElementById('textInput').value;
+  document.getElementById('charCount').textContent = t.length;
+  const w = t.trim().split(/\s+/).filter(Boolean).length;
+  document.getElementById('totalWords').textContent = (t.trim() ? w : 0) + ' كلمة';
+}
+
+function clearText() {
+  document.getElementById('textInput').value = '';
+  updateCount();
+  stopSpeech();
+}
+
+const presets = {
+  ar: 'السلام عليكم ورحمة الله وبركاته. يسعدنا أن نقدم لكم هذه الأداة الرائعة لتحويل النص إلى صوت. نتمنى أن تنال إعجابكم وتخدم احتياجاتكم.',
+  en: 'Hello! This is a text to speech demonstration. You can type any text here and listen to it being read aloud in different voices and languages.',
+  poem: 'يا وطني يا أغلى ما في الوجود\nأنت الحياة وأنت كل الوعود\nفي قلبي تسكن أشجانُك\nوعلى شفتيّ تحيا أغانيك',
+  news: 'أعلنت وكالة الأنباء الدولية اليوم عن اكتشافات علمية مثيرة في مجال الذكاء الاصطناعي. وقال الباحثون إن هذه الاكتشافات ستحدث ثورة في طريقة تعاملنا مع التكنولوجيا في المستقبل القريب.',
+  count: 'واحد، اثنان، ثلاثة، أربعة، خمسة، ستة، سبعة، ثمانية، تسعة، عشرة. 1, 2, 3, 4, 5, 6, 7, 8, 9, 10.'
+};
+
+function setPreset(key) {
+  document.getElementById('textInput').value = presets[key];
+  updateCount();
+}
+
+// Init count
+updateCount();
+
+// Warn if not supported
+if (!('speechSynthesis' in window)) {
+  document.getElementById('noSupport').style.display = 'block';
+}
+</script>
+</body>
+</html>
