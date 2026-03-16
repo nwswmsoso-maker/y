@@ -513,6 +513,18 @@
   }
   .voice-chip.iraqi.active { box-shadow: 0 2px 12px rgba(46,125,50,0.35); }
 
+  /* Adam voice special chip */
+  .voice-chip.adam {
+    border-color: rgba(30,60,120,0.3);
+    background: linear-gradient(135deg, rgba(30,60,120,0.05), rgba(255,255,255,0));
+  }
+  .voice-chip.adam:hover, .voice-chip.adam.active {
+    border-color: #1e3c78;
+    background: linear-gradient(135deg, #1e3c78, #2a5298);
+    color: #fff;
+  }
+  .voice-chip.adam.active { box-shadow: 0 2px 12px rgba(30,60,120,0.4); }
+
   /* Download button */
   .btn-download {
     display: flex;
@@ -676,10 +688,15 @@
       <button class="voice-chip iraqi" id="iraqiChip" onclick="selectIraqiVoice()">
         🇮🇶 <span class="lang-badge" style="background:rgba(0,100,0,0.15);color:#2e7d32">IQ</span> عراقي
       </button>
+      <button class="voice-chip adam" id="adamChip" onclick="selectAdamVoice()">
+        🎙️ <span class="lang-badge" style="background:rgba(30,60,120,0.12);color:#1e3c78">EN</span> آدم
+      </button>
     </div>
 
     <!-- Iraqi status info -->
     <div id="iraqiInfo" style="display:none; margin:10px 24px 0; padding:12px 16px; border-radius:10px; background:rgba(46,125,50,0.08); border:1px solid rgba(46,125,50,0.2); gap:10px; align-items:flex-start;"></div>
+    <!-- Adam status info -->
+    <div id="adamInfo" style="display:none; margin:10px 24px 0; padding:12px 16px; border-radius:10px; background:rgba(30,60,120,0.07); border:1px solid rgba(30,60,120,0.18); gap:10px; align-items:flex-start;"></div>
     <div class="voice-grid" id="voiceGrid">
       <div style="color:var(--ink2); font-size:0.85rem; padding:4px 0">جارٍ تحميل الأصوات...</div>
     </div>
@@ -729,9 +746,10 @@
     <!-- Download ready -->
     <div class="dl-ready" id="dlReady">
       <div style="display:flex; flex-direction:column; gap:10px; width:100%;">
-        <div style="display:flex; align-items:center; gap:10px;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
           <span>✅ الصوت جاهز</span>
-          <a class="dl-link" id="dlLink" download="audio.mp3">⬇ تنزيل MP3</a>
+          <a class="dl-link" id="dlLink" download="adam-tts.mp3">⬇ تنزيل MP3</a>
+          <button class="dl-link" id="dlPreviewBtn" onclick="previewDownloadAudio()" style="background:#555; border:none; cursor:pointer;">▶ تشغيل معاينة</button>
         </div>
         <audio id="previewAudio" controls style="width:100%; height:36px; display:none;"></audio>
       </div>
@@ -780,16 +798,15 @@ let words = [];
 let wordIndex = 0;
 let isIraqiMode = false;
 
-// ─── Download via StreamElements TTS API ───
-// يجيب ملف MP3 مباشر بدون مشاركة شاشة أو تعقيد
+// ─── Download — استخدام Google TTS مباشرةً (بدون fetch، بدون CORS) ───
+let lastTtsUrl = '';
+let isAdamMode = false;
 
-// خريطة الصوت للـ API
-const SE_VOICE_MAP = {
-  ar: 'Zeina',       // عربي فصحى
-  iraqi: 'Zeina',    // أقرب صوت عربي متاح
-  en: 'Brian',
-  default: 'Zeina'
-};
+function buildTtsUrl(text, lang) {
+  // Google Translate TTS — يرجع MP3 مباشرة
+  const t = text.substring(0, 200);
+  return `https://translate.googleapis.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(t)}&tl=${lang}&client=tw-ob&ttsspeed=1`;
+}
 
 async function toggleDownloadRecord() {
   const text = document.getElementById('textInput').value.trim();
@@ -800,45 +817,72 @@ async function toggleDownloadRecord() {
 
   setDlLoading(true);
   document.getElementById('dlReady').classList.remove('show');
-
-  // اختيار الصوت المناسب للـ API
-  let apiVoice = SE_VOICE_MAP.default;
-  if (isIraqiMode) {
-    apiVoice = SE_VOICE_MAP.iraqi;
-  } else if (selectedVoice) {
-    const lang = selectedVoice.lang || '';
-    if (lang.startsWith('ar')) apiVoice = SE_VOICE_MAP.ar;
-    else if (lang.startsWith('en')) apiVoice = SE_VOICE_MAP.en;
-  }
+  document.getElementById('previewAudio').style.display = 'none';
 
   try {
-    const encoded = encodeURIComponent(text.substring(0, 300)); // الـ API يقبل حتى 300 حرف
-    const url = `https://api.streamelements.com/kappa/v2/speech?voice=${apiVoice}&text=${encoded}`;
+    // اختيار اللغة حسب الوضع
+    let lang = 'ar';
+    if (isAdamMode) lang = 'en';
+    else if (selectedVoice && selectedVoice.lang.startsWith('en')) lang = 'en';
 
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('API error ' + res.status);
+    const url = buildTtsUrl(text, lang);
+    lastTtsUrl = url;
 
+    // نجيب الملف كـ blob عبر proxy بسيط أو مباشرة
+    const res = await fetch(url, { method: 'GET' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const blob = await res.blob();
+
+    if (blob.size < 100) throw new Error('empty');
+
     const blobUrl = URL.createObjectURL(blob);
 
-    // عرض المشغل والتحميل
+    // ربط التنزيل
     const dlLink = document.getElementById('dlLink');
     dlLink.href = blobUrl;
-    dlLink.download = 'tts-audio-' + Date.now() + '.mp3';
+    dlLink.download = (isAdamMode ? 'adam' : isIraqiMode ? 'iraqi' : 'tts') + '-' + Date.now() + '.mp3';
 
-    // تشغيل المعاينة تلقائياً
-    const previewAudio = document.getElementById('previewAudio');
-    previewAudio.src = blobUrl;
-    previewAudio.style.display = 'block';
+    // تحضير المعاينة
+    const audio = document.getElementById('previewAudio');
+    audio.src = blobUrl;
 
     document.getElementById('dlReady').classList.add('show');
-    showDlStatus('✅ جاهز للتشغيل والتحميل', 'success');
+    showDlStatus('✅ جاهز — اضغط تشغيل أو تنزيل', 'success');
 
   } catch (err) {
-    console.error(err);
-    showDlStatus('❌ فشل التحميل. تحقق من الاتصال وحاول مجدداً.', 'error');
+    console.warn('fetch failed, fallback to direct URL:', err);
+    // Fallback: وصّل الـ URL مباشرة بدون fetch
+    try {
+      const url = buildTtsUrl(text, isAdamMode ? 'en' : 'ar');
+      lastTtsUrl = url;
+
+      const dlLink = document.getElementById('dlLink');
+      dlLink.href = url;
+      dlLink.target = '_blank'; // يفتح في تبويب جديد للتشغيل
+      dlLink.download = '';
+
+      const audio = document.getElementById('previewAudio');
+      audio.src = url;
+      audio.crossOrigin = 'anonymous';
+
+      document.getElementById('dlReady').classList.add('show');
+      showDlStatus('✅ اضغط تشغيل للمعاينة أو "تنزيل MP3" لتحميله', 'success');
+    } catch(e2) {
+      showDlStatus('❌ تعذّر التحميل. تحقق من الاتصال.', 'error');
+    }
   } finally {
     setDlLoading(false);
+  }
+}
+
+function previewDownloadAudio() {
+  const audio = document.getElementById('previewAudio');
+  audio.style.display = 'block';
+  if (audio.src) {
+    audio.play().catch(() => {
+      // إذا ما شتغل مباشرة، افتح في تبويب جديد
+      window.open(lastTtsUrl, '_blank');
+    });
   }
 }
 
@@ -849,7 +893,7 @@ function setDlLoading(on) {
   if (on) {
     btn.classList.add('recording');
     icon.textContent = '⏳';
-    label.textContent = 'جارٍ التحميل...';
+    label.textContent = 'جارٍ...';
     btn.disabled = true;
   } else {
     btn.classList.remove('recording');
@@ -864,7 +908,7 @@ function showDlStatus(msg, type) {
   el.textContent = msg;
   el.style.display = 'block';
   el.style.color = type === 'error' ? '#c62828' : type === 'warn' ? '#b45309' : '#2e7d32';
-  setTimeout(() => { el.style.display = 'none'; }, 4000);
+  setTimeout(() => { el.style.display = 'none'; }, 5000);
 }
 
 // ─── Iraqi Voice ───
@@ -900,6 +944,7 @@ function selectIraqiVoice() {
   const voiceName = selectedVoice ? selectedVoice.name.replace(/Microsoft |Google |Apple /,'').split(' (')[0] : null;
   
   const infoEl = document.getElementById('iraqiInfo');
+  document.getElementById('adamInfo').style.display = 'none';
   if (selectedVoice) {
     infoEl.style.display = 'flex';
     infoEl.innerHTML = `
@@ -914,7 +959,41 @@ function selectIraqiVoice() {
   }
 }
 
-// ─── Wave bars ───
+// ─── Adam Voice ───
+// يبحث عن صوت ذكر عميق (David, Mark, James, Daniel, Alex...)
+// إذا ما لگاه يطبّق إعدادات pitch عميقة على أحسن صوت متاح
+function selectAdamVoice() {
+  isAdamMode = true;
+  isIraqiMode = false;
+  document.querySelectorAll('.voice-chip').forEach(c => c.classList.remove('active'));
+  document.getElementById('adamChip').classList.add('active');
+
+  // الأسماء المعروفة لأصوات الذكور العميقة
+  const maleNames = ['david','mark','james','daniel','alex','matthew','george','oliver','fred','zira','adam','brian','guy','richard'];
+  const found = voices.find(v => maleNames.some(n => v.name.toLowerCase().includes(n)));
+  // أو أي صوت إنجليزي
+  const enVoice = voices.find(v => v.lang.startsWith('en'));
+  selectedVoice = found || enVoice || voices[0] || null;
+
+  // إعدادات آدم: صوت عميق جداً، ثقيل، ناعم
+  document.getElementById('pitchSlider').value = 0.65;
+  document.getElementById('rateSlider').value = 0.88;
+  updateSetting('pitch', 0.65);
+  updateSetting('rate', 0.88);
+
+  const infoEl = document.getElementById('adamInfo');
+  document.getElementById('iraqiInfo').style.display = 'none';
+  infoEl.style.display = 'flex';
+  const voiceName = selectedVoice
+    ? selectedVoice.name.replace(/Microsoft |Google |Apple /, '').split(' (')[0]
+    : 'أفضل صوت متاح';
+  infoEl.innerHTML = `
+    <span style="font-size:1.2rem">🎙️</span>
+    <div>
+      <div style="font-weight:700; font-size:0.85rem; color:#1e3c78">وضع صوت آدم مفعّل</div>
+      <div style="font-size:0.75rem; color:#2a5298; margin-top:2px">الصوت: <b>${voiceName}</b> — حدة عميقة جداً (0.65) لمحاكاة صوت آدم الشهير</div>
+    </div>`;
+}
 const waveBarsEl = document.getElementById('waveBars');
 const BAR_COUNT = 32;
 for (let i = 0; i < BAR_COUNT; i++) {
@@ -965,9 +1044,12 @@ function renderVoices() {
     chip.innerHTML = `<span class="lang-badge">${v.lang.split('-')[0].toUpperCase()}</span>${flag}${v.name.replace(/Microsoft |Google |Apple /, '').split(' (')[0].substring(0, 18)}`;
     chip.onclick = () => {
       isIraqiMode = false;
+      isAdamMode = false;
       document.querySelectorAll('.voice-chip').forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
       selectedVoice = v;
+      document.getElementById('iraqiInfo').style.display = 'none';
+      document.getElementById('adamInfo').style.display = 'none';
     };
     if (isFirst) selectedVoice = v;
     grid.appendChild(chip);
@@ -1029,10 +1111,14 @@ function speak() {
   utterance = new SpeechSynthesisUtterance(text);
   if (selectedVoice) utterance.voice = selectedVoice;
 
-  // Iraqi mode: override with deep, slow Iraqi-like parameters
+  // Iraqi/Adam mode: override with special parameters
   if (isIraqiMode) {
     utterance.rate  = 0.88;
     utterance.pitch = 0.82;
+    utterance.volume= parseFloat(document.getElementById('volSlider').value);
+  } else if (isAdamMode) {
+    utterance.rate  = 0.88;
+    utterance.pitch = 0.65;
     utterance.volume= parseFloat(document.getElementById('volSlider').value);
   } else {
     utterance.rate  = parseFloat(document.getElementById('rateSlider').value);
