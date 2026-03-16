@@ -683,22 +683,19 @@
     <div class="card-header">
       <div class="card-title">اختيار الصوت</div>
     </div>
-    <!-- Iraqi special chip -->
-    <div style="padding: 14px 24px 0; display:flex; gap:8px; flex-wrap:wrap;">
-      <button class="voice-chip iraqi" id="iraqiChip" onclick="selectIraqiVoice()">
-        🇮🇶 <span class="lang-badge" style="background:rgba(0,100,0,0.15);color:#2e7d32">IQ</span> عراقي
+    <div style="padding: 16px 24px; display:flex; gap:12px; flex-wrap:wrap;">
+      <button class="voice-chip iraqi active" id="iraqiChip" onclick="selectIraqiVoice()">
+        🇮🇶 عراقي عربي
       </button>
       <button class="voice-chip adam" id="adamChip" onclick="selectAdamVoice()">
-        🎙️ <span class="lang-badge" style="background:rgba(30,60,120,0.12);color:#1e3c78">EN</span> آدم
+        🇦🇺 آدم — أسترالي
       </button>
     </div>
-
-    <!-- Iraqi status info -->
-    <div id="iraqiInfo" style="display:none; margin:10px 24px 0; padding:12px 16px; border-radius:10px; background:rgba(46,125,50,0.08); border:1px solid rgba(46,125,50,0.2); gap:10px; align-items:flex-start;"></div>
-    <!-- Adam status info -->
-    <div id="adamInfo" style="display:none; margin:10px 24px 0; padding:12px 16px; border-radius:10px; background:rgba(30,60,120,0.07); border:1px solid rgba(30,60,120,0.18); gap:10px; align-items:flex-start;"></div>
-    <div class="voice-grid" id="voiceGrid">
-      <div style="color:var(--ink2); font-size:0.85rem; padding:4px 0">جارٍ تحميل الأصوات...</div>
+    <!-- Status info -->
+    <div id="voiceInfo" style="margin:0 24px 16px; padding:12px 16px; border-radius:10px; gap:10px; align-items:flex-start; font-size:0.82rem; display:flex;
+      background:rgba(46,125,50,0.08); border:1px solid rgba(46,125,50,0.2); color:#2e7d32;">
+      <span>🇮🇶</span>
+      <div><b>وضع العراقي مفعّل</b> — سيتم استخدام أقرب صوت عربي مع ضبط النبرة العراقية</div>
     </div>
   </div>
 
@@ -716,13 +713,9 @@
         <div class="setting-label">الحدة <span id="pitchVal">1.0</span></div>
         <input type="range" id="pitchSlider" min="0.5" max="2" step="0.05" value="1" oninput="updateSetting('pitch',this.value)">
       </div>
-      <div class="setting-item">
+      <div class="setting-item" style="grid-column: span 2;">
         <div class="setting-label">مستوى الصوت <span id="volVal">100%</span></div>
         <input type="range" id="volSlider" min="0" max="1" step="0.01" value="1" oninput="updateSetting('vol',this.value)">
-      </div>
-      <div class="setting-item">
-        <div class="setting-label">اللغة الافتراضية <span id="langVal">AR</span></div>
-        <input type="range" id="langSlider" min="0" max="1" step="1" value="0" oninput="updateLangPref(this.value)">
       </div>
     </div>
   </div>
@@ -793,10 +786,10 @@ let selectedVoice = null;
 let utterance = null;
 let isSpeaking = false;
 let isPaused = false;
-let langPref = 0;
 let words = [];
 let wordIndex = 0;
-let isIraqiMode = false;
+let isIraqiMode = true;
+let isAdamMode = false;
 
 // ─── Download — استخدام Google TTS مباشرةً (بدون fetch، بدون CORS) ───
 let lastTtsUrl = '';
@@ -912,88 +905,81 @@ function showDlStatus(msg, type) {
 }
 
 // ─── Iraqi Voice ───
-// المتصفحات نادراً ما تحتوي على صوت ar-IQ مدمج
-// الحل: نأخذ أفضل صوت عربي ونطبّق معالجة صوتية تحاكي اللهجة العراقية
-// عبر Web Audio API (pitch shift + EQ + formant filter)
-
-let iraqiAudioCtx = null;
-let iraqiSourceNode = null;
-
 function selectIraqiVoice() {
   isIraqiMode = true;
-  document.querySelectorAll('.voice-chip').forEach(c => c.classList.remove('active'));
+  isAdamMode = false;
   document.getElementById('iraqiChip').classList.add('active');
+  document.getElementById('adamChip').classList.remove('active');
 
-  // البحث عن أفضل صوت: ar-IQ → ar-SA → أي عربي
-  const priority = ['ar-IQ','ar-SA','ar-EG','ar-AE','ar-MA','ar-DZ','ar'];
+  // أفضل صوت عربي متاح
+  const priority = ['ar-IQ','ar-SA','ar-EG','ar-AE','ar-MA','ar-DZ'];
   let found = null;
   for (const lang of priority) {
     found = voices.find(v => v.lang === lang || v.lang.startsWith(lang));
     if (found) break;
   }
+  if (!found) found = voices.find(v => v.lang.startsWith('ar'));
   selectedVoice = found || null;
 
-  // إعدادات تحاكي النبرة العراقية: صوت أعمق، سرعة أبطأ قليلاً
+  // نبرة عراقية: أعمق + أبطأ
   document.getElementById('pitchSlider').value = 0.82;
   document.getElementById('rateSlider').value = 0.88;
   updateSetting('pitch', 0.82);
   updateSetting('rate', 0.88);
 
-  // عرض الحالة
-  const chip = document.getElementById('iraqiChip');
-  const voiceName = selectedVoice ? selectedVoice.name.replace(/Microsoft |Google |Apple /,'').split(' (')[0] : null;
-  
-  const infoEl = document.getElementById('iraqiInfo');
-  document.getElementById('adamInfo').style.display = 'none';
-  if (selectedVoice) {
-    infoEl.style.display = 'flex';
-    infoEl.innerHTML = `
-      <span style="font-size:1.1rem">🇮🇶</span>
-      <div>
-        <div style="font-weight:700; font-size:0.85rem; color:#1b5e20">وضع اللهجة العراقية مفعّل</div>
-        <div style="font-size:0.75rem; color:#2e7d32">الصوت المستخدم: <b>${voiceName}</b> + معالجة صوتية (حدة أعمق، إيقاع عراقي)</div>
-      </div>`;
-  } else {
-    infoEl.style.display = 'flex';
-    infoEl.innerHTML = `<span>⚠️</span><div style="font-size:0.82rem; color:#b45309">ما لقينا صوت عربي في متصفحك. حاول تثبّت حزمة اللغة العربية من إعدادات Windows/Mac.</div>`;
-  }
+  const infoEl = document.getElementById('voiceInfo');
+  const name = selectedVoice ? selectedVoice.name.replace(/Microsoft |Google |Apple /,'').split(' (')[0] : null;
+  infoEl.style.background = 'rgba(46,125,50,0.08)';
+  infoEl.style.border = '1px solid rgba(46,125,50,0.2)';
+  infoEl.style.color = '#2e7d32';
+  infoEl.innerHTML = selectedVoice
+    ? `<span>🇮🇶</span><div><b>وضع العراقي مفعّل</b> — الصوت: ${name} (نبرة عراقية)</div>`
+    : `<span>⚠️</span><div>ما لگينا صوت عربي — ثبّت حزمة اللغة العربية من إعدادات نظامك</div>`;
 }
 
-// ─── Adam Voice ───
-// يبحث عن صوت ذكر عميق (David, Mark, James, Daniel, Alex...)
-// إذا ما لگاه يطبّق إعدادات pitch عميقة على أحسن صوت متاح
+// ─── Adam Australian Voice ───
 function selectAdamVoice() {
   isAdamMode = true;
   isIraqiMode = false;
-  document.querySelectorAll('.voice-chip').forEach(c => c.classList.remove('active'));
   document.getElementById('adamChip').classList.add('active');
+  document.getElementById('iraqiChip').classList.remove('active');
 
-  // الأسماء المعروفة لأصوات الذكور العميقة
-  const maleNames = ['david','mark','james','daniel','alex','matthew','george','oliver','fred','zira','adam','brian','guy','richard'];
-  const found = voices.find(v => maleNames.some(n => v.name.toLowerCase().includes(n)));
-  // أو أي صوت إنجليزي
-  const enVoice = voices.find(v => v.lang.startsWith('en'));
-  selectedVoice = found || enVoice || voices[0] || null;
+  // أولوية: en-AU أسترالي → أي صوت ذكر إنجليزي → أي إنجليزي
+  const auVoice   = voices.find(v => v.lang === 'en-AU');
+  const maleNames = ['david','mark','james','daniel','alex','matthew','george','oliver','brian','guy','richard','lee','nathan','wayne'];
+  const maleVoice = voices.find(v => v.lang.startsWith('en') && maleNames.some(n => v.name.toLowerCase().includes(n)));
+  const enAny     = voices.find(v => v.lang.startsWith('en'));
+  selectedVoice   = auVoice || maleVoice || enAny || null;
 
-  // إعدادات آدم: صوت عميق جداً، ثقيل، ناعم
+  // آدم: صوت عميق ثقيل
   document.getElementById('pitchSlider').value = 0.65;
   document.getElementById('rateSlider').value = 0.88;
   updateSetting('pitch', 0.65);
   updateSetting('rate', 0.88);
 
-  const infoEl = document.getElementById('adamInfo');
-  document.getElementById('iraqiInfo').style.display = 'none';
-  infoEl.style.display = 'flex';
-  const voiceName = selectedVoice
-    ? selectedVoice.name.replace(/Microsoft |Google |Apple /, '').split(' (')[0]
-    : 'أفضل صوت متاح';
-  infoEl.innerHTML = `
-    <span style="font-size:1.2rem">🎙️</span>
-    <div>
-      <div style="font-weight:700; font-size:0.85rem; color:#1e3c78">وضع صوت آدم مفعّل</div>
-      <div style="font-size:0.75rem; color:#2a5298; margin-top:2px">الصوت: <b>${voiceName}</b> — حدة عميقة جداً (0.65) لمحاكاة صوت آدم الشهير</div>
-    </div>`;
+  const infoEl = document.getElementById('voiceInfo');
+  const name = selectedVoice ? selectedVoice.name.replace(/Microsoft |Google |Apple /,'').split(' (')[0] : null;
+  const lang = selectedVoice ? selectedVoice.lang : '';
+  infoEl.style.background = 'rgba(30,60,120,0.07)';
+  infoEl.style.border = '1px solid rgba(30,60,120,0.2)';
+  infoEl.style.color = '#1e3c78';
+  infoEl.innerHTML = selectedVoice
+    ? `<span>🇦🇺</span><div><b>صوت آدم الأسترالي مفعّل</b> — الصوت: ${name} (${lang}) — حدة عميقة جداً</div>`
+    : `<span>⚠️</span><div>ما لگينا صوت إنجليزي — ثبّت حزمة اللغة الإنجليزية من إعدادات نظامك</div>`;
 }
+
+// ─── Load Voices ───
+function loadVoices() {
+  voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return;
+  // تفعيل العراقي تلقائياً عند أول تحميل
+  selectIraqiVoice();
+}
+
+window.speechSynthesis.onvoiceschanged = loadVoices;
+loadVoices();
+
+// ─── Wave bars ───
 const waveBarsEl = document.getElementById('waveBars');
 const BAR_COUNT = 32;
 for (let i = 0; i < BAR_COUNT; i++) {
@@ -1013,51 +999,6 @@ function setWaveActive(on) {
   });
 }
 
-// ─── Voices ───
-function loadVoices() {
-  voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return;
-  renderVoices();
-}
-
-function renderVoices() {
-  const grid = document.getElementById('voiceGrid');
-  grid.innerHTML = '';
-
-  // Priority: Arabic voices first, then others
-  let ar = voices.filter(v => v.lang.startsWith('ar'));
-  let en = voices.filter(v => v.lang.startsWith('en'));
-  let rest = voices.filter(v => !v.lang.startsWith('ar') && !v.lang.startsWith('en'));
-
-  let list = langPref === 0 ? [...ar, ...en, ...rest.slice(0, 3)] : voices;
-
-  if (!list.length) {
-    grid.innerHTML = '<div style="color:var(--ink2);font-size:0.85rem">لا توجد أصوات متاحة في هذا المتصفح</div>';
-    return;
-  }
-
-  list.forEach((v, i) => {
-    const chip = document.createElement('button');
-    const isFirst = i === 0 && !isIraqiMode;
-    chip.className = 'voice-chip' + (isFirst ? ' active' : '');
-    const flag = v.lang.startsWith('ar') ? '🌙 ' : v.lang.startsWith('en') ? '🇬🇧 ' : '🌐 ';
-    chip.innerHTML = `<span class="lang-badge">${v.lang.split('-')[0].toUpperCase()}</span>${flag}${v.name.replace(/Microsoft |Google |Apple /, '').split(' (')[0].substring(0, 18)}`;
-    chip.onclick = () => {
-      isIraqiMode = false;
-      isAdamMode = false;
-      document.querySelectorAll('.voice-chip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      selectedVoice = v;
-      document.getElementById('iraqiInfo').style.display = 'none';
-      document.getElementById('adamInfo').style.display = 'none';
-    };
-    if (isFirst) selectedVoice = v;
-    grid.appendChild(chip);
-  });
-}
-
-window.speechSynthesis.onvoiceschanged = loadVoices;
-loadVoices();
 
 // ─── Settings ───
 function updateSetting(type, val) {
@@ -1065,12 +1006,6 @@ function updateSetting(type, val) {
   if (type === 'rate') document.getElementById('rateVal').textContent = val.toFixed(2) + '×';
   else if (type === 'pitch') document.getElementById('pitchVal').textContent = val.toFixed(2);
   else if (type === 'vol') document.getElementById('volVal').textContent = Math.round(val * 100) + '%';
-}
-
-function updateLangPref(val) {
-  langPref = parseInt(val);
-  document.getElementById('langVal').textContent = val == 0 ? 'AR' : 'ALL';
-  renderVoices();
 }
 
 // ─── Speak ───
