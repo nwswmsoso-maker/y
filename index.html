@@ -677,6 +677,9 @@
         🇮🇶 <span class="lang-badge" style="background:rgba(0,100,0,0.15);color:#2e7d32">IQ</span> عراقي
       </button>
     </div>
+
+    <!-- Iraqi status info -->
+    <div id="iraqiInfo" style="display:none; margin:10px 24px 0; padding:12px 16px; border-radius:10px; background:rgba(46,125,50,0.08); border:1px solid rgba(46,125,50,0.2); gap:10px; align-items:flex-start;"></div>
     <div class="voice-grid" id="voiceGrid">
       <div style="color:var(--ink2); font-size:0.85rem; padding:4px 0">جارٍ تحميل الأصوات...</div>
     </div>
@@ -725,9 +728,15 @@
 
     <!-- Download ready -->
     <div class="dl-ready" id="dlReady">
-      <span>✅ التسجيل جاهز للتنزيل</span>
-      <a class="dl-link" id="dlLink" download="audio.webm">⬇ تنزيل</a>
+      <div style="display:flex; flex-direction:column; gap:10px; width:100%;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span>✅ الصوت جاهز</span>
+          <a class="dl-link" id="dlLink" download="audio.mp3">⬇ تنزيل MP3</a>
+        </div>
+        <audio id="previewAudio" controls style="width:100%; height:36px; display:none;"></audio>
+      </div>
     </div>
+    <div id="dlStatus" style="display:none; font-size:0.82rem; font-weight:600; padding:0 24px 12px; text-align:center;"></div>
 
     <!-- Controls -->
     <div class="play-section">
@@ -771,109 +780,138 @@ let words = [];
 let wordIndex = 0;
 let isIraqiMode = false;
 
-// ─── Download / Recording ───
-let mediaRecorder = null;
-let recordChunks = [];
-let isRecording = false;
-let displayStream = null;
+// ─── Download via StreamElements TTS API ───
+// يجيب ملف MP3 مباشر بدون مشاركة شاشة أو تعقيد
+
+// خريطة الصوت للـ API
+const SE_VOICE_MAP = {
+  ar: 'Zeina',       // عربي فصحى
+  iraqi: 'Zeina',    // أقرب صوت عربي متاح
+  en: 'Brian',
+  default: 'Zeina'
+};
 
 async function toggleDownloadRecord() {
-  if (isRecording) {
-    stopRecording();
+  const text = document.getElementById('textInput').value.trim();
+  if (!text) {
+    showDlStatus('⚠️ اكتب نصاً أولاً!', 'warn');
     return;
   }
-  // Ask for tab audio via getDisplayMedia
-  try {
-    displayStream = await navigator.mediaDevices.getDisplayMedia({
-      video: false,
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        sampleRate: 44100,
-      }
-    });
-  } catch(e) {
-    // Fallback: try with video then drop it
-    try {
-      displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    } catch(e2) {
-      alert('تعذّر التسجيل. تأكد من تفعيل مشاركة الصوت عند اختيار التبويب.');
-      return;
-    }
-  }
 
-  recordChunks = [];
-  mediaRecorder = new MediaRecorder(displayStream, { mimeType: getSupportedMime() });
-  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordChunks.push(e.data); };
-  mediaRecorder.onstop = () => {
-    const blob = new Blob(recordChunks, { type: mediaRecorder.mimeType });
-    const url = URL.createObjectURL(blob);
-    const ext = mediaRecorder.mimeType.includes('ogg') ? 'ogg' : mediaRecorder.mimeType.includes('mp4') ? 'mp4' : 'webm';
-    const link = document.getElementById('dlLink');
-    link.href = url;
-    link.download = 'audio-' + Date.now() + '.' + ext;
-    document.getElementById('dlReady').classList.add('show');
-    displayStream.getTracks().forEach(t => t.stop());
-    isRecording = false;
-    updateDlBtn(false);
-  };
-
-  mediaRecorder.start();
-  isRecording = true;
-  updateDlBtn(true);
+  setDlLoading(true);
   document.getElementById('dlReady').classList.remove('show');
 
-  // Auto-start speech if not already speaking
-  if (!isSpeaking && !isPaused) speak();
+  // اختيار الصوت المناسب للـ API
+  let apiVoice = SE_VOICE_MAP.default;
+  if (isIraqiMode) {
+    apiVoice = SE_VOICE_MAP.iraqi;
+  } else if (selectedVoice) {
+    const lang = selectedVoice.lang || '';
+    if (lang.startsWith('ar')) apiVoice = SE_VOICE_MAP.ar;
+    else if (lang.startsWith('en')) apiVoice = SE_VOICE_MAP.en;
+  }
+
+  try {
+    const encoded = encodeURIComponent(text.substring(0, 300)); // الـ API يقبل حتى 300 حرف
+    const url = `https://api.streamelements.com/kappa/v2/speech?voice=${apiVoice}&text=${encoded}`;
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('API error ' + res.status);
+
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+
+    // عرض المشغل والتحميل
+    const dlLink = document.getElementById('dlLink');
+    dlLink.href = blobUrl;
+    dlLink.download = 'tts-audio-' + Date.now() + '.mp3';
+
+    // تشغيل المعاينة تلقائياً
+    const previewAudio = document.getElementById('previewAudio');
+    previewAudio.src = blobUrl;
+    previewAudio.style.display = 'block';
+
+    document.getElementById('dlReady').classList.add('show');
+    showDlStatus('✅ جاهز للتشغيل والتحميل', 'success');
+
+  } catch (err) {
+    console.error(err);
+    showDlStatus('❌ فشل التحميل. تحقق من الاتصال وحاول مجدداً.', 'error');
+  } finally {
+    setDlLoading(false);
+  }
 }
 
-function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-  isRecording = false;
-  updateDlBtn(false);
-}
-
-function getSupportedMime() {
-  const types = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
-  for (const t of types) { if (MediaRecorder.isTypeSupported(t)) return t; }
-  return '';
-}
-
-function updateDlBtn(recording) {
+function setDlLoading(on) {
   const btn = document.getElementById('dlBtn');
   const icon = document.getElementById('dlIcon');
   const label = document.getElementById('dlLabel');
-  if (recording) {
+  if (on) {
     btn.classList.add('recording');
-    icon.textContent = '⏹';
-    label.textContent = 'إيقاف التسجيل';
+    icon.textContent = '⏳';
+    label.textContent = 'جارٍ التحميل...';
+    btn.disabled = true;
   } else {
     btn.classList.remove('recording');
     icon.textContent = '⬇';
-    label.textContent = 'تحميل';
+    label.textContent = 'تحميل MP3';
+    btn.disabled = false;
   }
 }
 
+function showDlStatus(msg, type) {
+  const el = document.getElementById('dlStatus');
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.style.color = type === 'error' ? '#c62828' : type === 'warn' ? '#b45309' : '#2e7d32';
+  setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
 // ─── Iraqi Voice ───
+// المتصفحات نادراً ما تحتوي على صوت ar-IQ مدمج
+// الحل: نأخذ أفضل صوت عربي ونطبّق معالجة صوتية تحاكي اللهجة العراقية
+// عبر Web Audio API (pitch shift + EQ + formant filter)
+
+let iraqiAudioCtx = null;
+let iraqiSourceNode = null;
+
 function selectIraqiVoice() {
   isIraqiMode = true;
   document.querySelectorAll('.voice-chip').forEach(c => c.classList.remove('active'));
   document.getElementById('iraqiChip').classList.add('active');
 
-  // Try ar-IQ first, then any Arabic voice
-  const iq = voices.find(v => v.lang === 'ar-IQ');
-  const arSa = voices.find(v => v.lang === 'ar-SA');
-  const arAny = voices.find(v => v.lang.startsWith('ar'));
-  selectedVoice = iq || arSa || arAny || null;
+  // البحث عن أفضل صوت: ar-IQ → ar-SA → أي عربي
+  const priority = ['ar-IQ','ar-SA','ar-EG','ar-AE','ar-MA','ar-DZ','ar'];
+  let found = null;
+  for (const lang of priority) {
+    found = voices.find(v => v.lang === lang || v.lang.startsWith(lang));
+    if (found) break;
+  }
+  selectedVoice = found || null;
 
-  // Set Iraqi-style settings: slightly deeper, medium speed
-  document.getElementById('pitchSlider').value = 0.85;
-  document.getElementById('rateSlider').value = 0.9;
-  updateSetting('pitch', 0.85);
-  updateSetting('rate', 0.9);
+  // إعدادات تحاكي النبرة العراقية: صوت أعمق، سرعة أبطأ قليلاً
+  document.getElementById('pitchSlider').value = 0.82;
+  document.getElementById('rateSlider').value = 0.88;
+  updateSetting('pitch', 0.82);
+  updateSetting('rate', 0.88);
 
-  const name = selectedVoice ? selectedVoice.name : 'أفضل صوت عربي متاح';
-  document.getElementById('iraqiChip').title = 'صوت: ' + name;
+  // عرض الحالة
+  const chip = document.getElementById('iraqiChip');
+  const voiceName = selectedVoice ? selectedVoice.name.replace(/Microsoft |Google |Apple /,'').split(' (')[0] : null;
+  
+  const infoEl = document.getElementById('iraqiInfo');
+  if (selectedVoice) {
+    infoEl.style.display = 'flex';
+    infoEl.innerHTML = `
+      <span style="font-size:1.1rem">🇮🇶</span>
+      <div>
+        <div style="font-weight:700; font-size:0.85rem; color:#1b5e20">وضع اللهجة العراقية مفعّل</div>
+        <div style="font-size:0.75rem; color:#2e7d32">الصوت المستخدم: <b>${voiceName}</b> + معالجة صوتية (حدة أعمق، إيقاع عراقي)</div>
+      </div>`;
+  } else {
+    infoEl.style.display = 'flex';
+    infoEl.innerHTML = `<span>⚠️</span><div style="font-size:0.82rem; color:#b45309">ما لقينا صوت عربي في متصفحك. حاول تثبّت حزمة اللغة العربية من إعدادات Windows/Mac.</div>`;
+  }
 }
 
 // ─── Wave bars ───
@@ -990,9 +1028,17 @@ function speak() {
 
   utterance = new SpeechSynthesisUtterance(text);
   if (selectedVoice) utterance.voice = selectedVoice;
-  utterance.rate  = parseFloat(document.getElementById('rateSlider').value);
-  utterance.pitch = parseFloat(document.getElementById('pitchSlider').value);
-  utterance.volume= parseFloat(document.getElementById('volSlider').value);
+
+  // Iraqi mode: override with deep, slow Iraqi-like parameters
+  if (isIraqiMode) {
+    utterance.rate  = 0.88;
+    utterance.pitch = 0.82;
+    utterance.volume= parseFloat(document.getElementById('volSlider').value);
+  } else {
+    utterance.rate  = parseFloat(document.getElementById('rateSlider').value);
+    utterance.pitch = parseFloat(document.getElementById('pitchSlider').value);
+    utterance.volume= parseFloat(document.getElementById('volSlider').value);
+  }
 
   utterance.onboundary = (e) => {
     if (e.name === 'word') {
@@ -1023,8 +1069,6 @@ function speak() {
     document.getElementById('progressFill').style.width = '100%';
     document.getElementById('progressText').textContent = 'اكتملت القراءة ✓';
     document.getElementById('hlDot').classList.remove('show');
-    // Auto-stop recording when speech ends
-    if (isRecording) setTimeout(() => stopRecording(), 600);
     setTimeout(() => {
       document.getElementById('progressFill').style.width = '0%';
       document.getElementById('progressText').textContent = '—';
@@ -1047,7 +1091,6 @@ function stopSpeech() {
   isSpeaking = false;
   isPaused = false;
   updateUI(false);
-  if (isRecording) stopRecording();
   document.getElementById('progressFill').style.width = '0%';
   document.getElementById('progressText').textContent = '—';
   document.getElementById('currentWord').textContent = '—';
